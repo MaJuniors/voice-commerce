@@ -1,0 +1,17 @@
+# === Google Cloud credentials (JANGAN KE GITHUB) ===
+server/gcloud/key.json
+
+# === Cache hasil scraping ===
+server/products_tokopedia_cache.json
+
+# === Environment files ===
+.env
+
+# === Python ===
+__pycache__/
+*.pyc
+
+# === OS / Editor ===
+.DS_Store
+Thumbs.db
+.vscode/

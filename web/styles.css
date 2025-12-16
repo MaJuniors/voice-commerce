@@ -1,0 +1,134 @@
+:root{
+  color-scheme: light dark;
+  --bg:#0b0f14;
+  --panel:#111723;
+  --text:#e7ecf3;
+  --muted:#9fb0c3;
+  --primary:#1976D2;
+  --danger:#B00020;
+}
+
+body{
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui,"Segoe UI",Arial,sans-serif;
+}
+
+/* LOG */
+.log{
+  height: 42vh;
+  overflow: auto;
+  background: var(--panel);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  line-height: 1.5;
+}
+
+.log a{ color:#8ab4ff; text-decoration:underline; }
+.log a:hover{ text-decoration:none; }
+.log .u{ color:#b6e3ff; }
+.log .b{ color:#ffd699; }
+.log .sep{ color:#ffffff44; }
+.log .prod{ margin-left:10px; display:block; }
+
+/* MIC */
+.mic{
+  width: 140px;
+  height: 140px;
+  background: var(--primary);
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  transition: transform .08s ease, background .12s ease, box-shadow .12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mic:active{
+  transform: scale(.94);
+}
+.mic.recording{
+  background: var(--danger);
+  box-shadow: 0 10px 30px rgba(176,0,32,.45);
+}
+
+/* HINT & AUDIO */
+.hint{
+  color: var(--muted);
+}
+#player{
+  max-width: 520px;
+  margin: 0 auto;
+  display: block;
+}
+
+/* PRODUK WRAPPER */
+.products{
+  max-width: 960px;
+  margin: 24px auto 0;
+  padding: 0 12px;
+}
+
+.products-title{
+  font-size: 0.95rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+/* deretan kartu */
+.products-row{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: flex-start;  /* atau center kalau mau */
+}
+
+/* KARTU PRODUK */
+.product-card{
+  flex: 1 1 260px;     /* semua kartu minimal 260px, maksimal 300px */
+  max-width: 300px;
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between; /* isi & tombol rata bawah */
+  min-height: 180px;  /* supaya tingginya mirip-mirip */
+}
+
+/* kalau nanti sudah ada gambar tinggal pakai ini */
+.product-img{
+  width: 100%;
+  border-radius: 10px;
+  object-fit: cover;
+  max-height: 160px;
+  margin-bottom: 6px;
+}
+
+.product-name{
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 2px 0 4px;
+}
+
+.product-price{
+  font-size: 0.9rem;
+  color: #ffd699;
+  margin: 0 0 8px;
+}
+
+/* tombol full width & sejajar */
+.product-btn{
+  display: block;
+  width: 100%;
+  text-align: center;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  text-decoration: none;
+  font-size: 0.9rem;
+  margin-top: auto;   /* dorong tombol ke bawah */
+}
+
+.product-btn:hover{
+  text-decoration: none;
+  filter: brightness(1.05);
+}
+

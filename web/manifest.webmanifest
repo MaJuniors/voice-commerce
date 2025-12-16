@@ -1,0 +1,9 @@
+{
+  "name": "Voice Commerce Bot",
+  "short_name": "VCBot",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#1976D2",
+  "icons": []
+}
