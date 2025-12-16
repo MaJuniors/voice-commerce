@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+python-multipart
+requests
+google-cloud-speech
+google-cloud-texttospeech
