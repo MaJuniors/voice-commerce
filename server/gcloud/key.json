@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "flash-park-390307",
+  "private_key_id": "d2becc4f52fcc74a19c3e4a5402f87c95b0aecf5",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDb0FTwMdATeGH1\n5U3p/8IEMeOwAo+fG2Bn5v3MNT30FoHjJN0OJKJZPrs3xVUvzkFyI0C7WWoDca2P\n+0Bk2sfMX33ltzgdQsqh6RLsc5kjOXGufwKmiXfLfjTtBIznf3sKrH6nvXmF4lq8\n7HHQHkvxvxoawp+VAJFg+IQP5Eh3rGLb5QvyRBnKw0gu6B4RejJQM4H3JiYxA4um\n1LP1l+u5OvYTHVAGr8B3ddm/1ILrFKGnEbHGTWr8QfczlufzTzSIW5nW+1eaKjqf\nDz0wzOcTdojGfmYE1Qozafrrasc4mocWpWY6VTc/gEkC0ta1P+C/Jyb5B6bU+1XG\nM/bX5jt/AgMBAAECggEAKVHyvYonmpldFMurh0q4DnDQY7Q/ikGrsCxoVhxGDp2y\ngd/am/9/8zXLHLNADbIAdHOzBeTLfGVAopmw46SKvVzP/kAgUMPO8nutPnyGc2wn\ndg1TEroxpjONwGZEFHpOx1Vgo6iG8Qd5Vh0+Uch4LzPktNYUCH7oVSmyLYiUpMYO\nRM877hIxYgMA75LelL32FQmuUyAbStkU8kxh33ZlcPMsVvBreAOSaKRYXvqoRRR8\nSOanmtCRuQiAwRqY8MhRyzuooQ984YOVudQn8awoynzBtKot8xel/BaFldG31L59\ngxbl6TvpneKDZnm6YfAULbYqOHEjhN2+UPRDC+NxFQKBgQDyWf9Zef+ohaU90pf+\nHDsyQxuyoE/Br6z53qggbVeVi4f77X7kK35RT6VfOS9yKN7sGOwSaE55HPaHJUCn\n36Os6rfk7907ID3kb6y78yNlqS/n0JSqlLV7Aq+rO+OvtN5KFwF9+KHDXZ7EYkH2\nHKcbuQ/e0dfCyxg+Foepe2PAvQKBgQDoMWfWdFuvmHVJYopo4iCnkdShffUWIlg/\nHGY3dYCJ5JUEQ7afIeV8E4cam9xTKrJxwJTZAv8Rl0QrSuSiZnPRGndgEEp3rg+j\nEricnJ1O8pznUCnIyz3oMmPaKtSOiyhSCWikes7qp68EP4qILxDlkdm7kt9Odq+g\nfNfovb1m6wKBgGAhqtRHPE4QlTcsrfWyJRkO3ZHBXWGq2aZT18TlGnTLYCliT48a\nYYTHXwWinVtfMu3cBOhYT6hjALci476zSy1v/XnmW470fxh547659zSAI+yEJDR1\nwHcG3b/ChdJQoEwrTAA3+5KPNEcZ4qhJPVAV3GG6QyeVgAxAy5dCxpLRAoGARsUg\nOA4ZD+kw/mAJfbRGbayWGW6xr8BiE0JNqWOn/N9tx/H3jIMhVfMBv8t3mOWvo9ol\nxAsUwUDQpz1ZeGIvtLETZ3UvrVChNXv0Rs+5ZqGtzxbw1WGVCdup8YoSZSvm6zIw\n8cj4ni7jujC/wYhO5xnQOkqmw1yLZSgICskiHGcCgYEA4gfDyqEFpi4rM8xw54/z\nOFEnEUN2YwuQKzWs5l3XrRtbsZXovKkVLYxMbqq+S107YCzIETvCC/+lZltd1QjY\nFnX/izD3QbgRd8e48t3cKwMBKY3Cgo7BQsA1QTmJo6OKV9BQ0KqDKIZcK+gRHCiP\nTtRiUf3Wzrh/1a0pN/3eyS8=\n-----END PRIVATE KEY-----\n",
+  "client_email": "voice-bot@flash-park-390307.iam.gserviceaccount.com",
+  "client_id": "108491922906021362184",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/voice-bot%40flash-park-390307.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
