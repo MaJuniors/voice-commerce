@@ -12,12 +12,16 @@ from pathlib import Path
 app = FastAPI(title="Voice Commerce PWA Backend")
 
 # ===== Serve frontend (folder web/) =====
-app.mount("/static", StaticFiles(directory="web"), name="static")
+BASE_DIR = Path(__file__).resolve().parent.parent   # root project: voice-commerce-pwa/
+WEB_DIR  = BASE_DIR / "web"
 
-@app.get("/")
-def serve_index():
-    return FileResponse("web/index.html")
+# serve file statis langsung dari root: /styles.css, /app.js, dll
+if WEB_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
 
+    @app.get("/", include_in_schema=False)
+    def serve_index():
+        return FileResponse(WEB_DIR / "index.html")
 
 # ===== CORS =====
 app.add_middleware(
@@ -36,7 +40,7 @@ SR = 16000  # sample rate audio WAV dari frontend
 # =================================================
 APIFY_TOKEN = os.getenv("APIFY_TOKEN", "apify_api_GwHwgel8SW9vFAcHnnYl8md62HmINo3lOsdY")
 APIFY_ACTOR = os.getenv("APIFY_ACTOR", "jupri~tokopedia-scraper")
-CACHE_PATH  = os.getenv("CACHE_PATH", r"D:\voice-commerce-pwa\server\products_tokopedia_cache.json")
+CACHE_PATH = os.getenv("CACHE_PATH", str(Path("/tmp/products_tokopedia_cache.json")))
 
 
 # ---------- Helper harga & gambar ----------
