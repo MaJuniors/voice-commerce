@@ -1,5 +1,5 @@
 // ====== KONFIG BACKEND ======
-const SERVER = window.location.origin; 
+const SERVER = `${location.origin}/api`; 
 
 // ====== ELEMEN UI ======
 const logBox  = document.getElementById('log');
