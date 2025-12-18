@@ -3,21 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from google.cloud import speech, texttospeech
 import io, os, re, json, requests
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+import wave
 
 
 # ================== FastAPI app ==================
 app = FastAPI(title="Voice Commerce PWA Backend")
 
-# ===== Serve frontend (server/web) =====
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
-
-WEB_DIR = Path(__file__).resolve().parent / "web"
-
-app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 # ===== CORS =====
 app.add_middleware(
     CORSMiddleware,
@@ -66,14 +59,6 @@ def _normalize_price(raw):
     price_text = None
 
     if isinstance(raw, dict):
-        # Contoh struktur Apify untuk Tokopedia:
-        # {
-        #   "discountPercentage": 0,
-        #   "number": 186480,
-        #   "original": "Rp259.000",
-        #   "range": "",
-        #   "text": "Rp186.480"
-        # }
         price_val = (
             raw.get("number")
             or raw.get("value")
@@ -103,11 +88,9 @@ def _normalize_image(raw):
     if not raw:
         return ""
 
-    # String langsung
     if isinstance(raw, str):
         return raw
 
-    # Kalau list, ambil elemen pertama
     if isinstance(raw, list) and raw:
         return _normalize_image(raw[0])
 
@@ -138,8 +121,6 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
         f"{APIFY_ACTOR}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
     )
 
-    # Berdasarkan error "input.query must be array",
-    # kita kirim query SELALU sebagai array.
     payload_candidates = [
         {"Query": [keyword], "Limit": max(3, limit)},
         {"query": [keyword], "limit": max(3, limit)},
@@ -188,8 +169,8 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
                 items.append(
                     {
                         "name": name,
-                        "price": price_str or "Rp -",   # string siap tampil
-                        "price_value": price_val,       # angka (kalau mau filter)
+                        "price": price_str or "Rp -",
+                        "price_value": price_val,
                         "url": urlp,
                         "image": img,
                     }
@@ -233,6 +214,7 @@ def tokopedia_search_cached(keyword: str, limit: int = 3):
             pass
     return items
 
+
 # ===== Google creds from env (Railway friendly) =====
 GOOGLE_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if GOOGLE_JSON and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
@@ -247,19 +229,34 @@ if GOOGLE_JSON and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
 @app.post("/stt")
 async def stt(file: UploadFile = File(...)):
     data = await file.read()
+
+    # Decode WAV -> PCM16 (lebih aman untuk Google STT)
+    try:
+        with wave.open(io.BytesIO(data), "rb") as wf:
+            pcm = wf.readframes(wf.getnframes())
+            sr = wf.getframerate()
+            ch = wf.getnchannels()
+    except Exception:
+        pcm = data
+        sr = SR
+        ch = 1
+
     client = speech.SpeechClient()
-    audio = speech.RecognitionAudio(content=data)
+    audio = speech.RecognitionAudio(content=pcm)
     config = speech.RecognitionConfig(
         language_code="id-ID",
         encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=SR,
+        sample_rate_hertz=sr,
+        audio_channel_count=ch,
         enable_automatic_punctuation=True,
     )
     resp = client.recognize(config=config, audio=audio)
+
     text = " ".join(
         r.alternatives[0].transcript.strip()
         for r in resp.results
     ) if resp.results else ""
+
     return {"text": text}
 
 
@@ -294,19 +291,11 @@ def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
 #                NLU RINGAN
 # =================================================
 def extract_search_query(user_text: str) -> str:
-    """
-    Ambil kata kunci setelah 'cari/carikan/mencari ...'.
-    Kalau kosong, kembalikan teks asal.
-    """
     t = user_text.lower()
     m = re.search(r"\bcari(?:kan)?\b(.*)", t)
     if m:
         q = m.group(1).strip()
-        q = re.sub(
-            r"^(?:kan|in|dong|ya|untuk|produk)\b",
-            "",
-            q,
-        ).strip()
+        q = re.sub(r"^(?:kan|in|dong|ya|untuk|produk)\b", "", q).strip()
         return q if q else user_text
     return user_text
 
@@ -316,16 +305,10 @@ def extract_search_query(user_text: str) -> str:
 # =================================================
 @app.get("/tokopedia/search")
 def tokopedia_search_api(q: str = Query(...), limit: int = 3):
-    """
-    Endpoint JSON untuk frontend (render kartu produk).
-    Menggunakan extract_search_query supaya keyword
-    sama dengan yang dipakai /reply.
-    """
     search_kw = extract_search_query(q)
     items = tokopedia_search_cached(search_kw, limit=limit)
 
     for it in items:
-        # pastikan price & image string rapi
         if not isinstance(it.get("price"), str):
             base = it.get("price_value") or it.get("price") or 0
             it["price"] = _format_idr(base)
@@ -333,11 +316,7 @@ def tokopedia_search_api(q: str = Query(...), limit: int = 3):
         if not isinstance(it.get("image"), str):
             it["image"] = _normalize_image(it.get("image"))
 
-    return {
-        "count": len(items),
-        "items": items,
-        "keyword": search_kw,
-    }
+    return {"count": len(items), "items": items, "keyword": search_kw}
 
 
 # =================================================
@@ -359,32 +338,24 @@ async def reply(text: str = Form(...)):
         "beli", "harga",
     )
 
-    # Intent pencarian produk
     if any(t in user for t in SEARCH_TRIGGERS):
         kw = extract_search_query(user_orig)
         items = tokopedia_search_cached(kw, limit=3)
 
         if items:
-            ssml = [
-                "<speak>",
-                f"Saya menemukan {len(items)} produk Tokopedia untuk {kw}.",
-            ]
+            ssml = ["<speak>", f"Saya menemukan {len(items)} produk Tokopedia untuk {kw}."]
             for i, it in enumerate(items, 1):
-                nama  = it.get("name") or "produk"
+                nama = it.get("name") or "produk"
                 harga = it.get("price") or "tidak diketahui"
-                ssml.append(
-                    f" Produk {i}: {nama}. Harganya sekitar {harga}. "
-                    "<break time='300ms'/>"
-                )
+                ssml.append(f" Produk {i}: {nama}. Harganya sekitar {harga}. <break time='300ms'/>")
             ssml.append(" Ingin saya kirim tautannya?</speak>")
             mp3 = tts_mp3_bytes("".join(ssml), ssml=True)
             return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
-        else:
-            bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
-            mp3 = tts_mp3_bytes(bot)
-            return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
-    # Salam / fallback
+        bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
+        mp3 = tts_mp3_bytes(bot)
+        return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
+
     if any(w in user for w in ["halo", "hai", "selamat"]):
         bot = "Halo! Mau cari produk apa hari ini? Ucapkan misalnya: cari kacamata hitam."
     else:
@@ -392,3 +363,12 @@ async def reply(text: str = Form(...)):
 
     mp3 = tts_mp3_bytes(bot)
     return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
+
+
+# =================================================
+#  STATIC FRONTEND (HARUS DI PALING BAWAH!)
+#  folder: server/web/
+# =================================================
+WEB_DIR = Path(__file__).resolve().parent / "web"
+if WEB_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
