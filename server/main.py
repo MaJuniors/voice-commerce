@@ -11,30 +11,13 @@ from pathlib import Path
 # ================== FastAPI app ==================
 app = FastAPI(title="Voice Commerce PWA Backend")
 
-# ===== Serve frontend (folder web/) =====
-from starlette.staticfiles import StaticFiles  # pastikan ini ada (kamu sudah import StaticFiles di atas)
-# (FileResponse dan Path sudah kamu import)
+# ===== Serve frontend (server/web) =====
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
-HERE = Path(__file__).resolve().parent            # .../server
-CANDIDATES = [
-    HERE / "web",                                # kalau web/ ada di dalam server/
-    HERE.parent / "web",                         # kalau web/ sejajar dengan server/ (root repo)
-    Path.cwd() / "web",                          # fallback (kadang working dir beda)
-]
+WEB_DIR = Path(__file__).resolve().parent / "web"
 
-WEB_DIR = next((p for p in CANDIDATES if p.exists()), None)
-
-if WEB_DIR:
-    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
-else:
-    @app.get("/", include_in_schema=False)
-    def serve_index_missing():
-        return {
-            "error": "Folder web/ tidak ditemukan di server.",
-            "checked_paths": [str(p) for p in CANDIDATES],
-            "hint": "Pastikan folder web/ ikut ter-deploy. Kalau Railway Root Directory = server, pindahkan web/ ke server/web atau ubah Root Directory ke repo root."
-        }
-
+app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 # ===== CORS =====
 app.add_middleware(
     CORSMiddleware,
