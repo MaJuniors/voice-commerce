@@ -1,6 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 from google.cloud import speech, texttospeech
 import io, os, re, json, requests
 from fastapi.staticfiles import StaticFiles
@@ -20,54 +20,20 @@ app.add_middleware(
 
 SR = 16000  # sample rate audio WAV dari frontend
 
-# =================================================
-#   GOOGLE CREDS (Railway friendly) - FIX UTAMA
-#   Kamu isi Variables di Railway per-field: type, project_id, private_key, dst
-#   Kode ini akan bikin file JSON dan set GOOGLE_APPLICATION_CREDENTIALS
-# =================================================
-def _ensure_google_creds():
-    # Opsi A: kalau kamu punya 1 variable full JSON
-    GOOGLE_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    if GOOGLE_JSON:
-        creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
-        creds_path.write_text(GOOGLE_JSON, encoding="utf-8")
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
-        return
-
-    # Opsi B: kalau kamu isi per-field di Railway (ini yang ada di screenshot kamu)
-    keys = [
-        "type",
-        "project_id",
-        "private_key_id",
-        "private_key",
-        "client_email",
-        "client_id",
-        "auth_uri",
-        "token_uri",
-        "auth_provider_x509_cert_url",
-        "client_x509_cert_url",
-    ]
-    if all(os.getenv(k) for k in keys):
-        data = {k: os.getenv(k) for k in keys}
-
-        # private_key sering ke-escape jadi "\n" -> harus dibalikin ke newline asli
-        data["private_key"] = data["private_key"].replace("\\n", "\n")
-
-        creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
-        creds_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
-        return
-
-_ensure_google_creds()
+# ===== Google creds from env (Railway friendly) =====
+GOOGLE_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if GOOGLE_JSON and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+    creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
+    creds_path.write_text(GOOGLE_JSON, encoding="utf-8")
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
 
 # =================================================
 #                APIFY — TOKOPEDIA
 # =================================================
-APIFY_TOKEN = os.getenv("APIFY_TOKEN")  # JANGAN hardcode token di code
+APIFY_TOKEN = os.getenv("APIFY_TOKEN")  # JANGAN default token hardcode
 APIFY_ACTOR = os.getenv("APIFY_ACTOR", "jupri~tokopedia-scraper")
-CACHE_PATH  = os.getenv("CACHE_PATH", str(Path("/tmp/products_tokopedia_cache.json")))
+CACHE_PATH = os.getenv("CACHE_PATH", str(Path("/tmp/products_tokopedia_cache.json")))
 
-# ---------- Helper harga & gambar ----------
 def _format_idr(val):
     try:
         if isinstance(val, str):
@@ -87,26 +53,13 @@ def _format_idr(val):
 def _normalize_price(raw):
     price_val = None
     price_text = None
-
     if isinstance(raw, dict):
-        price_val = (
-            raw.get("number")
-            or raw.get("value")
-            or raw.get("min")
-            or raw.get("max")
-        )
-        price_text = (
-            raw.get("text")
-            or raw.get("original")
-            or raw.get("display")
-            or raw.get("formatted")
-        )
+        price_val = raw.get("number") or raw.get("value") or raw.get("min") or raw.get("max")
+        price_text = raw.get("text") or raw.get("original") or raw.get("display") or raw.get("formatted")
     else:
         price_val = raw
-
     if not price_text and price_val is not None:
         price_text = _format_idr(price_val)
-
     return price_val, price_text
 
 def _normalize_image(raw):
@@ -132,14 +85,11 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
     if not (APIFY_TOKEN and APIFY_ACTOR):
         return []
 
-    url = (
-        f"https://api.apify.com/v2/acts/"
-        f"{APIFY_ACTOR}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
-    )
+    url = f"https://api.apify.com/v2/acts/{APIFY_ACTOR}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
 
     payload_candidates = [
-        {"Query": [keyword], "Limit": max(3, limit)},
         {"query": [keyword], "limit": max(3, limit)},
+        {"Query": [keyword], "Limit": max(3, limit)},
     ]
 
     for payload in payload_candidates:
@@ -158,38 +108,16 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
             for it in data[:limit]:
                 name = it.get("name") or it.get("title") or ""
 
-                raw_price = (
-                    it.get("price")
-                    or it.get("priceMin")
-                    or it.get("price_value")
-                    or it.get("price_int")
-                )
+                raw_price = it.get("price") or it.get("priceMin") or it.get("price_value") or it.get("price_int")
                 price_val, price_str = _normalize_price(raw_price)
 
-                urlp = (
-                    it.get("url")
-                    or it.get("productUrl")
-                    or it.get("product_url")
-                    or ""
-                )
+                urlp = it.get("url") or it.get("productUrl") or it.get("product_url") or ""
 
-                raw_img = (
-                    it.get("image")
-                    or it.get("imageUrl")
-                    or it.get("image_url")
-                    or it.get("img")
-                    or it.get("images")
-                )
+                raw_img = it.get("image") or it.get("imageUrl") or it.get("image_url") or it.get("img") or it.get("images")
                 img = _normalize_image(raw_img)
 
                 items.append(
-                    {
-                        "name": name,
-                        "price": price_str or "Rp -",
-                        "price_value": price_val,
-                        "url": urlp,
-                        "image": img,
-                    }
+                    {"name": name, "price": price_str or "Rp -", "price_value": price_val, "url": urlp, "image": img}
                 )
 
             if items:
@@ -224,60 +152,6 @@ def tokopedia_search_cached(keyword: str, limit: int = 3):
             pass
     return items
 
-# =================================================
-#                GOOGLE STT  (FIX JSON ERROR)
-# =================================================
-@app.post("/stt")
-async def stt(file: UploadFile = File(...)):
-    try:
-        data = await file.read()
-        client = speech.SpeechClient()
-        audio = speech.RecognitionAudio(content=data)
-        config = speech.RecognitionConfig(
-            language_code="id-ID",
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=SR,
-            enable_automatic_punctuation=True,
-        )
-        resp = client.recognize(config=config, audio=audio)
-        text = " ".join(
-            r.alternatives[0].transcript.strip()
-            for r in resp.results
-        ) if resp.results else ""
-        return {"text": text}
-    except Exception as e:
-        # BALIKIN JSON BIAR FRONTEND NGGAK CRASH .json()
-        return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
-
-# =================================================
-#                GOOGLE TTS
-# =================================================
-def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
-    tts = texttospeech.TextToSpeechClient()
-    inp = (
-        texttospeech.SynthesisInput(ssml=text)
-        if ssml
-        else texttospeech.SynthesisInput(text=text)
-    )
-    voice_sel = texttospeech.VoiceSelectionParams(
-        language_code="id-ID",
-        name=voice,
-    )
-    cfg = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.MP3,
-        speaking_rate=0.95,
-        pitch=-2.0,
-    )
-    resp = tts.synthesize_speech(
-        input=inp,
-        voice=voice_sel,
-        audio_config=cfg,
-    )
-    return resp.audio_content
-
-# =================================================
-#                NLU RINGAN
-# =================================================
 def extract_search_query(user_text: str) -> str:
     t = user_text.lower()
     m = re.search(r"\bcari(?:kan)?\b(.*)", t)
@@ -288,10 +162,38 @@ def extract_search_query(user_text: str) -> str:
     return user_text
 
 # =================================================
-#          Endpoint JSON Tokopedia (untuk kartu)
-#          (FIX: ini HARUS jalan, tidak boleh ketangkep static)
+#   API ROUTER: semua endpoint backend di /api/*
 # =================================================
-@app.get("/tokopedia/search")
+api = APIRouter(prefix="/api")
+
+@api.post("/stt")
+async def stt(file: UploadFile = File(...)):
+    data = await file.read()
+    client = speech.SpeechClient()
+    audio = speech.RecognitionAudio(content=data)
+    config = speech.RecognitionConfig(
+        language_code="id-ID",
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+        sample_rate_hertz=SR,
+        enable_automatic_punctuation=True,
+    )
+    resp = client.recognize(config=config, audio=audio)
+    text = " ".join(r.alternatives[0].transcript.strip() for r in resp.results) if resp.results else ""
+    return {"text": text}
+
+def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
+    tts = texttospeech.TextToSpeechClient()
+    inp = texttospeech.SynthesisInput(ssml=text) if ssml else texttospeech.SynthesisInput(text=text)
+    voice_sel = texttospeech.VoiceSelectionParams(language_code="id-ID", name=voice)
+    cfg = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3,
+        speaking_rate=0.95,
+        pitch=-2.0,
+    )
+    resp = tts.synthesize_speech(input=inp, voice=voice_sel, audio_config=cfg)
+    return resp.audio_content
+
+@api.get("/tokopedia/search")
 def tokopedia_search_api(q: str = Query(...), limit: int = 3):
     search_kw = extract_search_query(q)
     items = tokopedia_search_cached(search_kw, limit=limit)
@@ -300,16 +202,12 @@ def tokopedia_search_api(q: str = Query(...), limit: int = 3):
         if not isinstance(it.get("price"), str):
             base = it.get("price_value") or it.get("price") or 0
             it["price"] = _format_idr(base)
-
         if not isinstance(it.get("image"), str):
             it["image"] = _normalize_image(it.get("image"))
 
     return {"count": len(items), "items": items, "keyword": search_kw}
 
-# =================================================
-#                REPLY (VUI)
-# =================================================
-@app.post("/reply")
+@api.post("/reply")
 async def reply(text: str = Form(...)):
     user_orig = (text or "").strip()
     user = user_orig.lower()
@@ -319,11 +217,7 @@ async def reply(text: str = Form(...)):
         mp3 = tts_mp3_bytes(bot)
         return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
-    SEARCH_TRIGGERS = (
-        "cari", "carikan", "mencari", "butuh",
-        "nyari", "ingin beli", "pengen beli",
-        "beli", "harga",
-    )
+    SEARCH_TRIGGERS = ("cari","carikan","mencari","butuh","nyari","ingin beli","pengen beli","beli","harga")
 
     if any(t in user for t in SEARCH_TRIGGERS):
         kw = extract_search_query(user_orig)
@@ -338,10 +232,10 @@ async def reply(text: str = Form(...)):
             ssml.append(" Ingin saya kirim tautannya?</speak>")
             mp3 = tts_mp3_bytes("".join(ssml), ssml=True)
             return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
-        else:
-            bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
-            mp3 = tts_mp3_bytes(bot)
-            return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
+
+        bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
+        mp3 = tts_mp3_bytes(bot)
+        return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
     if any(w in user for w in ["halo", "hai", "selamat"]):
         bot = "Halo! Mau cari produk apa hari ini? Ucapkan misalnya: cari kacamata hitam."
@@ -351,9 +245,12 @@ async def reply(text: str = Form(...)):
     mp3 = tts_mp3_bytes(bot)
     return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
+app.include_router(api)
+
 # =================================================
-#   SERVE FRONTEND (WAJIB PALING BAWAH) - FIX UTAMA
-#   Karena kalau mount "/" di atas, /tokopedia/search jadi ketangkep static.
+#  FRONTEND: serve server/web di ROOT (/)
+#  NOTE: pasang ini PALING BAWAH biar gak “nangkep” /api/*
 # =================================================
 WEB_DIR = Path(__file__).resolve().parent / "web"
-app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+if WEB_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
