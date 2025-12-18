@@ -1,13 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, Form, Query
+from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from google.cloud import speech, texttospeech
 import io, os, re, json, requests
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pathlib import Path
-import wave
-
 
 # ================== FastAPI app ==================
 app = FastAPI(title="Voice Commerce PWA Backend")
@@ -24,17 +21,54 @@ app.add_middleware(
 SR = 16000  # sample rate audio WAV dari frontend
 
 # =================================================
-#                APIFY — TOKOPEDIA
-#  Actor: jupri/tokopedia-scraper
+#   GOOGLE CREDS (Railway friendly) - FIX UTAMA
+#   Kamu isi Variables di Railway per-field: type, project_id, private_key, dst
+#   Kode ini akan bikin file JSON dan set GOOGLE_APPLICATION_CREDENTIALS
 # =================================================
-APIFY_TOKEN = os.getenv("APIFY_TOKEN", "apify_api_GwHwgel8SW9vFAcHnnYl8md62HmINo3lOsdY")
-APIFY_ACTOR = os.getenv("APIFY_ACTOR", "jupri~tokopedia-scraper")
-CACHE_PATH = os.getenv("CACHE_PATH", str(Path("/tmp/products_tokopedia_cache.json")))
+def _ensure_google_creds():
+    # Opsi A: kalau kamu punya 1 variable full JSON
+    GOOGLE_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if GOOGLE_JSON:
+        creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
+        creds_path.write_text(GOOGLE_JSON, encoding="utf-8")
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
+        return
 
+    # Opsi B: kalau kamu isi per-field di Railway (ini yang ada di screenshot kamu)
+    keys = [
+        "type",
+        "project_id",
+        "private_key_id",
+        "private_key",
+        "client_email",
+        "client_id",
+        "auth_uri",
+        "token_uri",
+        "auth_provider_x509_cert_url",
+        "client_x509_cert_url",
+    ]
+    if all(os.getenv(k) for k in keys):
+        data = {k: os.getenv(k) for k in keys}
+
+        # private_key sering ke-escape jadi "\n" -> harus dibalikin ke newline asli
+        data["private_key"] = data["private_key"].replace("\\n", "\n")
+
+        creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
+        creds_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
+        return
+
+_ensure_google_creds()
+
+# =================================================
+#                APIFY — TOKOPEDIA
+# =================================================
+APIFY_TOKEN = os.getenv("APIFY_TOKEN")  # JANGAN hardcode token di code
+APIFY_ACTOR = os.getenv("APIFY_ACTOR", "jupri~tokopedia-scraper")
+CACHE_PATH  = os.getenv("CACHE_PATH", str(Path("/tmp/products_tokopedia_cache.json")))
 
 # ---------- Helper harga & gambar ----------
 def _format_idr(val):
-    """Normalisasi angka/harga ke format Rupiah (string)."""
     try:
         if isinstance(val, str):
             s = val.strip()
@@ -50,12 +84,7 @@ def _format_idr(val):
     except Exception:
         return str(val)
 
-
 def _normalize_price(raw):
-    """
-    Terima raw price dari Apify (bisa dict / int / str),
-    balikan: (price_value_number / None, price_text_string / None)
-    """
     price_val = None
     price_text = None
 
@@ -80,21 +109,13 @@ def _normalize_price(raw):
 
     return price_val, price_text
 
-
 def _normalize_image(raw):
-    """
-    Terima raw image dari Apify (bisa str / dict / list),
-    balikan: url string atau "".
-    """
     if not raw:
         return ""
-
     if isinstance(raw, str):
         return raw
-
     if isinstance(raw, list) and raw:
         return _normalize_image(raw[0])
-
     if isinstance(raw, dict):
         return (
             raw.get("url")
@@ -107,13 +128,7 @@ def _normalize_image(raw):
         )
     return ""
 
-
-# ---------- Panggil APIFY ----------
 def tokopedia_search_via_apify(keyword: str, limit: int = 3):
-    """
-    Panggil Apify actor Tokopedia dan kembalikan list standar:
-    [{name, price (string), price_value (num), url, image}].
-    """
     if not (APIFY_TOKEN and APIFY_ACTOR):
         return []
 
@@ -186,13 +201,7 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
 
     return []
 
-
-# ---------- Cache sederhana di file JSON ----------
 def tokopedia_search_cached(keyword: str, limit: int = 3):
-    """
-    Cache file JSON supaya hemat kredit Apify.
-    Key = keyword lowercase, Value = list hasil.
-    """
     kw = (keyword or "").strip().lower()
     db = {}
     if os.path.exists(CACHE_PATH):
@@ -215,51 +224,30 @@ def tokopedia_search_cached(keyword: str, limit: int = 3):
             pass
     return items
 
-
-# ===== Google creds from env (Railway friendly) =====
-GOOGLE_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-if GOOGLE_JSON and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-    creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
-    creds_path.write_text(GOOGLE_JSON, encoding="utf-8")
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
-
-
 # =================================================
-#                GOOGLE STT
+#                GOOGLE STT  (FIX JSON ERROR)
 # =================================================
 @app.post("/stt")
 async def stt(file: UploadFile = File(...)):
-    data = await file.read()
-
-    # Decode WAV -> PCM16 (lebih aman untuk Google STT)
     try:
-        with wave.open(io.BytesIO(data), "rb") as wf:
-            pcm = wf.readframes(wf.getnframes())
-            sr = wf.getframerate()
-            ch = wf.getnchannels()
-    except Exception:
-        pcm = data
-        sr = SR
-        ch = 1
-
-    client = speech.SpeechClient()
-    audio = speech.RecognitionAudio(content=pcm)
-    config = speech.RecognitionConfig(
-        language_code="id-ID",
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=sr,
-        audio_channel_count=ch,
-        enable_automatic_punctuation=True,
-    )
-    resp = client.recognize(config=config, audio=audio)
-
-    text = " ".join(
-        r.alternatives[0].transcript.strip()
-        for r in resp.results
-    ) if resp.results else ""
-
-    return {"text": text}
-
+        data = await file.read()
+        client = speech.SpeechClient()
+        audio = speech.RecognitionAudio(content=data)
+        config = speech.RecognitionConfig(
+            language_code="id-ID",
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=SR,
+            enable_automatic_punctuation=True,
+        )
+        resp = client.recognize(config=config, audio=audio)
+        text = " ".join(
+            r.alternatives[0].transcript.strip()
+            for r in resp.results
+        ) if resp.results else ""
+        return {"text": text}
+    except Exception as e:
+        # BALIKIN JSON BIAR FRONTEND NGGAK CRASH .json()
+        return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
 
 # =================================================
 #                GOOGLE TTS
@@ -287,7 +275,6 @@ def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
     )
     return resp.audio_content
 
-
 # =================================================
 #                NLU RINGAN
 # =================================================
@@ -300,9 +287,9 @@ def extract_search_query(user_text: str) -> str:
         return q if q else user_text
     return user_text
 
-
 # =================================================
 #          Endpoint JSON Tokopedia (untuk kartu)
+#          (FIX: ini HARUS jalan, tidak boleh ketangkep static)
 # =================================================
 @app.get("/tokopedia/search")
 def tokopedia_search_api(q: str = Query(...), limit: int = 3):
@@ -318,7 +305,6 @@ def tokopedia_search_api(q: str = Query(...), limit: int = 3):
             it["image"] = _normalize_image(it.get("image"))
 
     return {"count": len(items), "items": items, "keyword": search_kw}
-
 
 # =================================================
 #                REPLY (VUI)
@@ -346,16 +332,16 @@ async def reply(text: str = Form(...)):
         if items:
             ssml = ["<speak>", f"Saya menemukan {len(items)} produk Tokopedia untuk {kw}."]
             for i, it in enumerate(items, 1):
-                nama = it.get("name") or "produk"
+                nama  = it.get("name") or "produk"
                 harga = it.get("price") or "tidak diketahui"
                 ssml.append(f" Produk {i}: {nama}. Harganya sekitar {harga}. <break time='300ms'/>")
             ssml.append(" Ingin saya kirim tautannya?</speak>")
             mp3 = tts_mp3_bytes("".join(ssml), ssml=True)
             return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
-
-        bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
-        mp3 = tts_mp3_bytes(bot)
-        return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
+        else:
+            bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
+            mp3 = tts_mp3_bytes(bot)
+            return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
     if any(w in user for w in ["halo", "hai", "selamat"]):
         bot = "Halo! Mau cari produk apa hari ini? Ucapkan misalnya: cari kacamata hitam."
@@ -365,31 +351,9 @@ async def reply(text: str = Form(...)):
     mp3 = tts_mp3_bytes(bot)
     return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
-
-# ===== Serve frontend (server/web) =====
+# =================================================
+#   SERVE FRONTEND (WAJIB PALING BAWAH) - FIX UTAMA
+#   Karena kalau mount "/" di atas, /tokopedia/search jadi ketangkep static.
+# =================================================
 WEB_DIR = Path(__file__).resolve().parent / "web"
-
-@app.get("/", include_in_schema=False)
-def serve_index():
-    return FileResponse(str(WEB_DIR / "index.html"))
-
-@app.get("/app.js", include_in_schema=False)
-def serve_app_js():
-    return FileResponse(str(WEB_DIR / "app.js"), media_type="application/javascript")
-
-@app.get("/styles.css", include_in_schema=False)
-def serve_css():
-    return FileResponse(str(WEB_DIR / "styles.css"), media_type="text/css")
-
-@app.get("/manifest.webmanifest", include_in_schema=False)
-def serve_manifest():
-    return FileResponse(str(WEB_DIR / "manifest.webmanifest"), media_type="application/manifest+json")
-
-@app.get("/sw.js", include_in_schema=False)
-def serve_sw():
-    return FileResponse(str(WEB_DIR / "sw.js"), media_type="application/javascript")
-
-# kalau kamu punya folder asset lain (misal web/static/, web/icons/, web/assets/)
-# ini aman karena path-nya bukan "/"
-if (WEB_DIR / "static").exists():
-    app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
+app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
