@@ -4,6 +4,7 @@ from fastapi.responses import StreamingResponse
 from google.cloud import speech, texttospeech
 import io, os, re, json, requests
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pathlib import Path
 import wave
 
