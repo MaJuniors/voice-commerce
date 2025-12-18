@@ -365,10 +365,30 @@ async def reply(text: str = Form(...)):
     return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
 
-# =================================================
-#  STATIC FRONTEND (HARUS DI PALING BAWAH!)
-#  folder: server/web/
-# =================================================
+# ===== Serve frontend (server/web) =====
 WEB_DIR = Path(__file__).resolve().parent / "web"
-if WEB_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+
+@app.get("/", include_in_schema=False)
+def serve_index():
+    return FileResponse(str(WEB_DIR / "index.html"))
+
+@app.get("/app.js", include_in_schema=False)
+def serve_app_js():
+    return FileResponse(str(WEB_DIR / "app.js"), media_type="application/javascript")
+
+@app.get("/styles.css", include_in_schema=False)
+def serve_css():
+    return FileResponse(str(WEB_DIR / "styles.css"), media_type="text/css")
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def serve_manifest():
+    return FileResponse(str(WEB_DIR / "manifest.webmanifest"), media_type="application/manifest+json")
+
+@app.get("/sw.js", include_in_schema=False)
+def serve_sw():
+    return FileResponse(str(WEB_DIR / "sw.js"), media_type="application/javascript")
+
+# kalau kamu punya folder asset lain (misal web/static/, web/icons/, web/assets/)
+# ini aman karena path-nya bukan "/"
+if (WEB_DIR / "static").exists():
+    app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
