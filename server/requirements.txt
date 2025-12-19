@@ -3,6 +3,4 @@ uvicorn[standard]
 python-multipart
 google-cloud-speech
 google-cloud-texttospeech
-transformers
-torch
 requests
