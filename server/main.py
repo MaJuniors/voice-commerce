@@ -2,10 +2,8 @@ from fastapi import FastAPI, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.routing import APIRouter
-from pathlib import Path
-
 from google.cloud import speech, texttospeech
+from pathlib import Path
 import io, os, re, json, requests
 
 # ================== FastAPI app ==================
@@ -14,7 +12,7 @@ app = FastAPI(title="Voice Commerce PWA Backend")
 # ===== CORS =====
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # kalau sudah production beneran, batasi domain
+    allow_origins=["*"],      # batasi saat deploy nanti
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,6 +24,7 @@ SR = 16000  # sample rate audio WAV dari frontend
 #   GOOGLE CREDS (Railway friendly)
 # =================================================
 def _ensure_google_creds():
+    # Opsi A: 1 env berisi full JSON
     GOOGLE_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
     if GOOGLE_JSON:
         creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
@@ -33,6 +32,7 @@ def _ensure_google_creds():
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
         return
 
+    # Opsi B: env per-field (type, project_id, dst)
     keys = [
         "type",
         "project_id",
@@ -48,9 +48,11 @@ def _ensure_google_creds():
     if all(os.getenv(k) for k in keys):
         data = {k: os.getenv(k) for k in keys}
         data["private_key"] = data["private_key"].replace("\\n", "\n")
+
         creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
         creds_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
+        return
 
 _ensure_google_creds()
 
@@ -125,7 +127,7 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
             r = requests.post(url, json=payload, timeout=60)
             r.raise_for_status()
 
-            if "application/json" not in (r.headers.get("content-type") or ""):
+            if not r.headers.get("content-type", "").startswith("application/json"):
                 continue
 
             data = r.json()
@@ -135,6 +137,7 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
             items = []
             for it in data[:limit]:
                 name = it.get("name") or it.get("title") or ""
+
                 raw_price = it.get("price") or it.get("priceMin") or it.get("price_value") or it.get("price_int")
                 price_val, price_str = _normalize_price(raw_price)
 
@@ -153,6 +156,7 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
 
             if items:
                 return items
+
         except Exception as e:
             print("[APIFY TOKOPEDIA ERROR]", e)
             continue
@@ -162,6 +166,7 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
 def tokopedia_search_cached(keyword: str, limit: int = 3):
     kw = (keyword or "").strip().lower()
     db = {}
+
     if os.path.exists(CACHE_PATH):
         try:
             with open(CACHE_PATH, "r", encoding="utf-8") as f:
@@ -183,39 +188,18 @@ def tokopedia_search_cached(keyword: str, limit: int = 3):
     return items
 
 # =================================================
-#                NLU RINGAN
+#  HEALTH CHECK (buat ngetes FastAPI beneran jalan)
 # =================================================
-def extract_search_query(user_text: str) -> str:
-    t = user_text.lower()
-    m = re.search(r"\bcari(?:kan)?\b(.*)", t)
-    if m:
-        q = m.group(1).strip()
-        q = re.sub(r"^(?:kan|in|dong|ya|untuk|produk)\b", "", q).strip()
-        return q if q else user_text
-    return user_text
+@app.get("/health")
+@app.get("/api/health")
+def health():
+    return {"ok": True}
 
 # =================================================
-#                GOOGLE TTS
+#                GOOGLE STT
 # =================================================
-def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
-    tts = texttospeech.TextToSpeechClient()
-    inp = texttospeech.SynthesisInput(ssml=text) if ssml else texttospeech.SynthesisInput(text=text)
-
-    voice_sel = texttospeech.VoiceSelectionParams(language_code="id-ID", name=voice)
-    cfg = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.MP3,
-        speaking_rate=0.95,
-        pitch=-2.0,
-    )
-    resp = tts.synthesize_speech(input=inp, voice=voice_sel, audio_config=cfg)
-    return resp.audio_content
-
-# =================================================
-#      ROUTER: semua API diprefix /api
-# =================================================
-api = APIRouter(prefix="/api")
-
-@api.post("/stt")
+@app.post("/stt")
+@app.post("/api/stt")
 async def stt(file: UploadFile = File(...)):
     try:
         data = await file.read()
@@ -233,7 +217,38 @@ async def stt(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
 
-@api.get("/tokopedia/search")
+# =================================================
+#                GOOGLE TTS
+# =================================================
+def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
+    tts = texttospeech.TextToSpeechClient()
+    inp = texttospeech.SynthesisInput(ssml=text) if ssml else texttospeech.SynthesisInput(text=text)
+    voice_sel = texttospeech.VoiceSelectionParams(language_code="id-ID", name=voice)
+    cfg = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3,
+        speaking_rate=0.95,
+        pitch=-2.0,
+    )
+    resp = tts.synthesize_speech(input=inp, voice=voice_sel, audio_config=cfg)
+    return resp.audio_content
+
+# =================================================
+#                NLU RINGAN
+# =================================================
+def extract_search_query(user_text: str) -> str:
+    t = (user_text or "").lower()
+    m = re.search(r"\bcari(?:kan)?\b(.*)", t)
+    if m:
+        q = m.group(1).strip()
+        q = re.sub(r"^(?:kan|in|dong|ya|untuk|produk)\b", "", q).strip()
+        return q if q else user_text
+    return user_text
+
+# =================================================
+#          Endpoint JSON Tokopedia
+# =================================================
+@app.get("/tokopedia/search")
+@app.get("/api/tokopedia/search")
 def tokopedia_search_api(q: str = Query(...), limit: int = 3):
     search_kw = extract_search_query(q)
     items = tokopedia_search_cached(search_kw, limit=limit)
@@ -247,7 +262,11 @@ def tokopedia_search_api(q: str = Query(...), limit: int = 3):
 
     return {"count": len(items), "items": items, "keyword": search_kw}
 
-@api.post("/reply")
+# =================================================
+#                REPLY (VUI)
+# =================================================
+@app.post("/reply")
+@app.post("/api/reply")
 async def reply(text: str = Form(...)):
     user_orig = (text or "").strip()
     user = user_orig.lower()
@@ -257,7 +276,7 @@ async def reply(text: str = Form(...)):
         mp3 = tts_mp3_bytes(bot)
         return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
-    SEARCH_TRIGGERS = ("cari", "carikan", "mencari", "butuh", "nyari", "ingin beli", "pengen beli", "beli", "harga")
+    SEARCH_TRIGGERS = ("cari","carikan","mencari","butuh","nyari","ingin beli","pengen beli","beli","harga")
 
     if any(t in user for t in SEARCH_TRIGGERS):
         kw = extract_search_query(user_orig)
@@ -266,16 +285,16 @@ async def reply(text: str = Form(...)):
         if items:
             ssml = ["<speak>", f"Saya menemukan {len(items)} produk Tokopedia untuk {kw}."]
             for i, it in enumerate(items, 1):
-                nama = it.get("name") or "produk"
+                nama  = it.get("name") or "produk"
                 harga = it.get("price") or "tidak diketahui"
                 ssml.append(f" Produk {i}: {nama}. Harganya sekitar {harga}. <break time='300ms'/>")
             ssml.append(" Ingin saya kirim tautannya?</speak>")
             mp3 = tts_mp3_bytes("".join(ssml), ssml=True)
             return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
-        else:
-            bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
-            mp3 = tts_mp3_bytes(bot)
-            return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
+
+        bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
+        mp3 = tts_mp3_bytes(bot)
+        return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
     if any(w in user for w in ["halo", "hai", "selamat"]):
         bot = "Halo! Mau cari produk apa hari ini? Ucapkan misalnya: cari kacamata hitam."
@@ -285,10 +304,9 @@ async def reply(text: str = Form(...)):
     mp3 = tts_mp3_bytes(bot)
     return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
-app.include_router(api)
-
 # =================================================
 #   SERVE FRONTEND (paling bawah)
 # =================================================
 WEB_DIR = Path(__file__).resolve().parent / "web"
-app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+if WEB_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
