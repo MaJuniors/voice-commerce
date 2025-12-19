@@ -2,24 +2,29 @@ from fastapi import FastAPI, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi import APIRouter
-from google.cloud import speech, texttospeech
-import io, os, re, json, requests
+from fastapi.routing import APIRouter
 from pathlib import Path
 
+from google.cloud import speech, texttospeech
+import io, os, re, json, requests
+
+# ================== FastAPI app ==================
 app = FastAPI(title="Voice Commerce PWA Backend")
 
+# ===== CORS =====
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # batasi saat production kalau sudah fix
+    allow_origins=["*"],   # kalau sudah production beneran, batasi domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-SR = 16000
+SR = 16000  # sample rate audio WAV dari frontend
 
-# ===================== GOOGLE CREDS =====================
+# =================================================
+#   GOOGLE CREDS (Railway friendly)
+# =================================================
 def _ensure_google_creds():
     GOOGLE_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
     if GOOGLE_JSON:
@@ -49,7 +54,9 @@ def _ensure_google_creds():
 
 _ensure_google_creds()
 
-# ===================== APIFY TOKOPEDIA =====================
+# =================================================
+#                APIFY — TOKOPEDIA
+# =================================================
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 APIFY_ACTOR = os.getenv("APIFY_ACTOR", "jupri~tokopedia-scraper")
 CACHE_PATH  = os.getenv("CACHE_PATH", str(Path("/tmp/products_tokopedia_cache.json")))
@@ -62,6 +69,7 @@ def _format_idr(val):
                 return s
             s = s.replace(".", "").replace(",", ".")
             val = float(s)
+
         v = float(val)
         return "Rp {:,.0f}".format(v).replace(",", ".")
     except Exception:
@@ -90,7 +98,15 @@ def _normalize_image(raw):
     if isinstance(raw, list) and raw:
         return _normalize_image(raw[0])
     if isinstance(raw, dict):
-        return raw.get("url") or raw.get("src") or raw.get("imageUrl") or raw.get("image_url") or raw.get("large") or raw.get("thumbnail") or ""
+        return (
+            raw.get("url")
+            or raw.get("src")
+            or raw.get("imageUrl")
+            or raw.get("image_url")
+            or raw.get("large")
+            or raw.get("thumbnail")
+            or ""
+        )
     return ""
 
 def tokopedia_search_via_apify(keyword: str, limit: int = 3):
@@ -109,7 +125,7 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
             r = requests.post(url, json=payload, timeout=60)
             r.raise_for_status()
 
-            if not r.headers.get("content-type", "").startswith("application/json"):
+            if "application/json" not in (r.headers.get("content-type") or ""):
                 continue
 
             data = r.json()
@@ -119,7 +135,6 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
             items = []
             for it in data[:limit]:
                 name = it.get("name") or it.get("title") or ""
-
                 raw_price = it.get("price") or it.get("priceMin") or it.get("price_value") or it.get("price_int")
                 price_val, price_str = _normalize_price(raw_price)
 
@@ -138,7 +153,6 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
 
             if items:
                 return items
-
         except Exception as e:
             print("[APIFY TOKOPEDIA ERROR]", e)
             continue
@@ -168,9 +182,11 @@ def tokopedia_search_cached(keyword: str, limit: int = 3):
             pass
     return items
 
-# ===================== NLU =====================
+# =================================================
+#                NLU RINGAN
+# =================================================
 def extract_search_query(user_text: str) -> str:
-    t = (user_text or "").lower()
+    t = user_text.lower()
     m = re.search(r"\bcari(?:kan)?\b(.*)", t)
     if m:
         q = m.group(1).strip()
@@ -178,10 +194,13 @@ def extract_search_query(user_text: str) -> str:
         return q if q else user_text
     return user_text
 
-# ===================== TTS =====================
+# =================================================
+#                GOOGLE TTS
+# =================================================
 def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
     tts = texttospeech.TextToSpeechClient()
     inp = texttospeech.SynthesisInput(ssml=text) if ssml else texttospeech.SynthesisInput(text=text)
+
     voice_sel = texttospeech.VoiceSelectionParams(language_code="id-ID", name=voice)
     cfg = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.MP3,
@@ -191,11 +210,13 @@ def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
     resp = tts.synthesize_speech(input=inp, voice=voice_sel, audio_config=cfg)
     return resp.audio_content
 
-# ===================== API ROUTER (/api/*) =====================
+# =================================================
+#      ROUTER: semua API diprefix /api
+# =================================================
 api = APIRouter(prefix="/api")
 
 @api.post("/stt")
-async def stt_api(file: UploadFile = File(...)):
+async def stt(file: UploadFile = File(...)):
     try:
         data = await file.read()
         client = speech.SpeechClient()
@@ -216,16 +237,18 @@ async def stt_api(file: UploadFile = File(...)):
 def tokopedia_search_api(q: str = Query(...), limit: int = 3):
     search_kw = extract_search_query(q)
     items = tokopedia_search_cached(search_kw, limit=limit)
+
     for it in items:
         if not isinstance(it.get("price"), str):
             base = it.get("price_value") or it.get("price") or 0
             it["price"] = _format_idr(base)
         if not isinstance(it.get("image"), str):
             it["image"] = _normalize_image(it.get("image"))
+
     return {"count": len(items), "items": items, "keyword": search_kw}
 
 @api.post("/reply")
-async def reply_api(text: str = Form(...)):
+async def reply(text: str = Form(...)):
     user_orig = (text or "").strip()
     user = user_orig.lower()
 
@@ -235,6 +258,7 @@ async def reply_api(text: str = Form(...)):
         return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
     SEARCH_TRIGGERS = ("cari", "carikan", "mencari", "butuh", "nyari", "ingin beli", "pengen beli", "beli", "harga")
+
     if any(t in user for t in SEARCH_TRIGGERS):
         kw = extract_search_query(user_orig)
         items = tokopedia_search_cached(kw, limit=3)
@@ -242,16 +266,16 @@ async def reply_api(text: str = Form(...)):
         if items:
             ssml = ["<speak>", f"Saya menemukan {len(items)} produk Tokopedia untuk {kw}."]
             for i, it in enumerate(items, 1):
-                nama  = it.get("name") or "produk"
+                nama = it.get("name") or "produk"
                 harga = it.get("price") or "tidak diketahui"
                 ssml.append(f" Produk {i}: {nama}. Harganya sekitar {harga}. <break time='300ms'/>")
             ssml.append(" Ingin saya kirim tautannya?</speak>")
             mp3 = tts_mp3_bytes("".join(ssml), ssml=True)
             return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
-
-        bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
-        mp3 = tts_mp3_bytes(bot)
-        return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
+        else:
+            bot = f"Maaf, belum ada hasil untuk {kw} di Tokopedia. Coba kata kunci lain ya."
+            mp3 = tts_mp3_bytes(bot)
+            return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
     if any(w in user for w in ["halo", "hai", "selamat"]):
         bot = "Halo! Mau cari produk apa hari ini? Ucapkan misalnya: cari kacamata hitam."
@@ -263,19 +287,8 @@ async def reply_api(text: str = Form(...)):
 
 app.include_router(api)
 
-# ===================== ALIAS ROUTES (BIAR FRONTEND LAMA TETAP JALAN) =====================
-@app.post("/stt")
-async def stt_alias(file: UploadFile = File(...)):
-    return await stt_api(file)
-
-@app.post("/reply")
-async def reply_alias(text: str = Form(...)):
-    return await reply_api(text)
-
-@app.get("/tokopedia/search")
-def tokopedia_search_alias(q: str = Query(...), limit: int = 3):
-    return tokopedia_search_api(q=q, limit=limit)
-
-# ===================== STATIC (PALING BAWAH) =====================
+# =================================================
+#   SERVE FRONTEND (paling bawah)
+# =================================================
 WEB_DIR = Path(__file__).resolve().parent / "web"
 app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
