@@ -6,25 +6,24 @@ from google.cloud import speech, texttospeech
 from pathlib import Path
 import io, os, re, json, requests
 
-# ================== FastAPI app ==================
 app = FastAPI(title="Voice Commerce PWA Backend")
 
 # ===== CORS =====
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # batasi saat deploy nanti
+    allow_origins=["*"],   # batasi saat deploy
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-SR = 16000  # sample rate audio WAV dari frontend
+SR = 16000
 
 # =================================================
-#   GOOGLE CREDS (Railway friendly)
+# GOOGLE CREDS (Cloud Run/Railway friendly)
 # =================================================
 def _ensure_google_creds():
-    # Opsi A: 1 env berisi full JSON
+    # Option A: full JSON in 1 env var
     GOOGLE_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
     if GOOGLE_JSON:
         creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
@@ -32,7 +31,7 @@ def _ensure_google_creds():
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
         return
 
-    # Opsi B: env per-field (type, project_id, dst)
+    # Option B: split env vars (type, project_id, dst...)
     keys = [
         "type",
         "project_id",
@@ -48,18 +47,16 @@ def _ensure_google_creds():
     if all(os.getenv(k) for k in keys):
         data = {k: os.getenv(k) for k in keys}
         data["private_key"] = data["private_key"].replace("\\n", "\n")
-
         creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
         creds_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
-        return
 
 _ensure_google_creds()
 
 # =================================================
-#                APIFY — TOKOPEDIA
+# APIFY — TOKOPEDIA
 # =================================================
-APIFY_TOKEN = os.getenv("APIFY_TOKEN")
+APIFY_TOKEN = os.getenv("APIFY_TOKEN")  # jangan hardcode
 APIFY_ACTOR = os.getenv("APIFY_ACTOR", "jupri~tokopedia-scraper")
 CACHE_PATH  = os.getenv("CACHE_PATH", str(Path("/tmp/products_tokopedia_cache.json")))
 
@@ -73,6 +70,8 @@ def _format_idr(val):
             val = float(s)
 
         v = float(val)
+        if v > 10_000_000 and v % 100000 == 0:
+            v = v / 100000.0
         return "Rp {:,.0f}".format(v).replace(",", ".")
     except Exception:
         return str(val)
@@ -100,15 +99,7 @@ def _normalize_image(raw):
     if isinstance(raw, list) and raw:
         return _normalize_image(raw[0])
     if isinstance(raw, dict):
-        return (
-            raw.get("url")
-            or raw.get("src")
-            or raw.get("imageUrl")
-            or raw.get("image_url")
-            or raw.get("large")
-            or raw.get("thumbnail")
-            or ""
-        )
+        return raw.get("url") or raw.get("src") or raw.get("imageUrl") or raw.get("image_url") or raw.get("large") or raw.get("thumbnail") or ""
     return ""
 
 def tokopedia_search_via_apify(keyword: str, limit: int = 3):
@@ -156,10 +147,8 @@ def tokopedia_search_via_apify(keyword: str, limit: int = 3):
 
             if items:
                 return items
-
         except Exception as e:
             print("[APIFY TOKOPEDIA ERROR]", e)
-            continue
 
     return []
 
@@ -185,20 +174,24 @@ def tokopedia_search_cached(keyword: str, limit: int = 3):
                 json.dump(db, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
     return items
 
 # =================================================
-#  HEALTH CHECK (buat ngetes FastAPI beneran jalan)
+# NLU
 # =================================================
-@app.get("/health")
-@app.get("/api/health")
-def health():
-    return {"ok": True}
+def extract_search_query(user_text: str) -> str:
+    t = (user_text or "").lower()
+    m = re.search(r"\bcari(?:kan)?\b(.*)", t)
+    if m:
+        q = m.group(1).strip()
+        q = re.sub(r"^(?:kan|in|dong|ya|untuk|produk)\b", "", q).strip()
+        return q if q else user_text
+    return user_text
 
 # =================================================
-#                GOOGLE STT
+# API ROUTES (pakai prefix /api biar gak ketangkep static)
 # =================================================
-@app.post("/stt")
 @app.post("/api/stt")
 async def stt(file: UploadFile = File(...)):
     try:
@@ -217,9 +210,6 @@ async def stt(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
 
-# =================================================
-#                GOOGLE TTS
-# =================================================
 def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
     tts = texttospeech.TextToSpeechClient()
     inp = texttospeech.SynthesisInput(ssml=text) if ssml else texttospeech.SynthesisInput(text=text)
@@ -232,40 +222,6 @@ def tts_mp3_bytes(text: str, *, ssml: bool = False, voice="id-ID-Wavenet-A"):
     resp = tts.synthesize_speech(input=inp, voice=voice_sel, audio_config=cfg)
     return resp.audio_content
 
-# =================================================
-#                NLU RINGAN
-# =================================================
-def extract_search_query(user_text: str) -> str:
-    t = (user_text or "").lower()
-    m = re.search(r"\bcari(?:kan)?\b(.*)", t)
-    if m:
-        q = m.group(1).strip()
-        q = re.sub(r"^(?:kan|in|dong|ya|untuk|produk)\b", "", q).strip()
-        return q if q else user_text
-    return user_text
-
-# =================================================
-#          Endpoint JSON Tokopedia
-# =================================================
-@app.get("/tokopedia/search")
-@app.get("/api/tokopedia/search")
-def tokopedia_search_api(q: str = Query(...), limit: int = 3):
-    search_kw = extract_search_query(q)
-    items = tokopedia_search_cached(search_kw, limit=limit)
-
-    for it in items:
-        if not isinstance(it.get("price"), str):
-            base = it.get("price_value") or it.get("price") or 0
-            it["price"] = _format_idr(base)
-        if not isinstance(it.get("image"), str):
-            it["image"] = _normalize_image(it.get("image"))
-
-    return {"count": len(items), "items": items, "keyword": search_kw}
-
-# =================================================
-#                REPLY (VUI)
-# =================================================
-@app.post("/reply")
 @app.post("/api/reply")
 async def reply(text: str = Form(...)):
     user_orig = (text or "").strip()
@@ -276,8 +232,7 @@ async def reply(text: str = Form(...)):
         mp3 = tts_mp3_bytes(bot)
         return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
-    SEARCH_TRIGGERS = ("cari","carikan","mencari","butuh","nyari","ingin beli","pengen beli","beli","harga")
-
+    SEARCH_TRIGGERS = ("cari", "carikan", "mencari", "butuh", "nyari", "ingin beli", "pengen beli", "beli", "harga")
     if any(t in user for t in SEARCH_TRIGGERS):
         kw = extract_search_query(user_orig)
         items = tokopedia_search_cached(kw, limit=3)
@@ -304,8 +259,22 @@ async def reply(text: str = Form(...)):
     mp3 = tts_mp3_bytes(bot)
     return StreamingResponse(io.BytesIO(mp3), media_type="audio/mpeg")
 
+@app.get("/api/tokopedia/search")
+def tokopedia_search_api(q: str = Query(...), limit: int = 3):
+    search_kw = extract_search_query(q)
+    items = tokopedia_search_cached(search_kw, limit=limit)
+
+    for it in items:
+        if not isinstance(it.get("price"), str):
+            base = it.get("price_value") or it.get("price") or 0
+            it["price"] = _format_idr(base)
+        if not isinstance(it.get("image"), str):
+            it["image"] = _normalize_image(it.get("image"))
+
+    return {"count": len(items), "items": items, "keyword": search_kw}
+
 # =================================================
-#   SERVE FRONTEND (paling bawah)
+# Serve frontend (PALING BAWAH)
 # =================================================
 WEB_DIR = Path(__file__).resolve().parent / "web"
 if WEB_DIR.exists():

@@ -7,6 +7,14 @@ server/products_tokopedia_cache.json
 # === Environment files ===
 .env
 
+# secrets
+server/gcloud/*.json
+*.json
+
+# artifacts
+*.mp3
+server/test_gcloud.py
+
 # === Python ===
 __pycache__/
 *.pyc
