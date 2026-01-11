@@ -20,40 +20,6 @@ app.add_middleware(
 SR = 16000
 
 # =================================================
-# GOOGLE CREDS (Cloud Run/Railway friendly)
-# =================================================
-def _ensure_google_creds():
-    # Option A: full JSON in 1 env var
-    GOOGLE_JSON = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    if GOOGLE_JSON:
-        creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
-        creds_path.write_text(GOOGLE_JSON, encoding="utf-8")
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
-        return
-
-    # Option B: split env vars (type, project_id, dst...)
-    keys = [
-        "type",
-        "project_id",
-        "private_key_id",
-        "private_key",
-        "client_email",
-        "client_id",
-        "auth_uri",
-        "token_uri",
-        "auth_provider_x509_cert_url",
-        "client_x509_cert_url",
-    ]
-    if all(os.getenv(k) for k in keys):
-        data = {k: os.getenv(k) for k in keys}
-        data["private_key"] = data["private_key"].replace("\\n", "\n")
-        creds_path = Path(__file__).resolve().parent / "gcloud_key.json"
-        creds_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
-
-_ensure_google_creds()
-
-# =================================================
 # APIFY — TOKOPEDIA
 # =================================================
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")  # jangan hardcode

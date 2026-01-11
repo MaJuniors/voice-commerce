@@ -1,23 +1,19 @@
 # === Google Cloud credentials (JANGAN KE GITHUB) ===
-server/gcloud/key.json
-
-# === Cache hasil scraping ===
-server/products_tokopedia_cache.json
+server/gcloud/*.json
 
 # === Environment files ===
 .env
 
-# secrets
-server/gcloud/*.json
-*.json
+# === Cache hasil scraping ===
+server/products_tokopedia_cache.json
 
-# artifacts
+# === Artifacts ===
 *.mp3
-server/test_gcloud.py
 
 # === Python ===
 __pycache__/
 *.pyc
+*.pyo
 
 # === OS / Editor ===
 .DS_Store
