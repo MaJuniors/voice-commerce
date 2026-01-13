@@ -6,21 +6,50 @@
   --muted:#9fb0c3;
   --primary:#1976D2;
   --danger:#B00020;
+
+  /* ===== TUNING GAMPANG ===== */
+  --mic-size: 240px;      /* ukuran mic default (desktop) */
+  --mic-size-mobile: 72vw;/* ukuran mic di HP (relatif layar) */
+  --dock-pad-top: 14px;
+  --dock-pad-bot: 18px;
+  --dock-gap: 10px;
 }
 
+*{ box-sizing:border-box; }
+
+html, body{ height:100%; }
 body{
+  margin:0;
   background: var(--bg);
   color: var(--text);
   font-family: system-ui,"Segoe UI",Arial,sans-serif;
 }
 
-/* LOG */
+/* =================================================
+   MAIN LAYOUT: kasih ruang bawah supaya gak ketutup dock
+   ================================================= */
+main.app{
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 18px 12px;
+  /* ruang untuk dock + safe area iPhone */
+  padding-bottom: calc(
+    var(--dock-pad-top) + var(--dock-pad-bot) + 56px + /* hint kira-kira */
+    clamp(180px, var(--mic-size-mobile), var(--mic-size)) +
+    env(safe-area-inset-bottom, 0px)
+  );
+}
+
+/* =================================================
+   LOG
+   ================================================= */
 .log{
   height: 42vh;
   overflow: auto;
   background: var(--panel);
+  border-radius: 14px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .log a{ color:#8ab4ff; text-decoration:underline; }
@@ -30,105 +59,160 @@ body{
 .log .sep{ color:#ffffff44; }
 .log .prod{ margin-left:10px; display:block; }
 
-/* MIC */
-.mic{
-  width: 140px;
-  height: 140px;
-  background: var(--primary);
-  box-shadow: 0 10px 30px rgba(0,0,0,.35);
-  transition: transform .08s ease, background .12s ease, box-shadow .12s ease;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.mic:active{
-  transform: scale(.94);
-}
-.mic.recording{
-  background: var(--danger);
-  box-shadow: 0 10px 30px rgba(176,0,32,.45);
-}
-
-/* HINT & AUDIO */
-.hint{
-  color: var(--muted);
-}
-#player{
-  max-width: 520px;
-  margin: 0 auto;
-  display: block;
-}
-
-/* PRODUK WRAPPER */
+/* =================================================
+   PRODUK
+   ================================================= */
 .products{
-  max-width: 960px;
-  margin: 24px auto 0;
-  padding: 0 12px;
+  margin: 18px auto 0;
+  padding: 0;
 }
 
 .products-title{
-  font-size: 0.95rem;
+  font-size: 0.98rem;
   color: var(--muted);
-  margin-bottom: 0.5rem;
+  margin: 0 0 10px;
 }
 
-/* deretan kartu */
 .products-row{
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
-  justify-content: flex-start;  /* atau center kalau mau */
 }
 
-/* KARTU PRODUK */
 .product-card{
-  flex: 1 1 260px;     /* semua kartu minimal 260px, maksimal 300px */
-  max-width: 300px;
   background: var(--panel);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between; /* isi & tombol rata bawah */
-  min-height: 180px;  /* supaya tingginya mirip-mirip */
+  min-height: 190px;
 }
 
-/* kalau nanti sudah ada gambar tinggal pakai ini */
 .product-img{
   width: 100%;
-  border-radius: 10px;
+  border-radius: 12px;
   object-fit: cover;
-  max-height: 160px;
-  margin-bottom: 6px;
+  max-height: 170px;
+  margin-bottom: 8px;
 }
 
 .product-name{
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin: 2px 0 4px;
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin: 2px 0 8px;
 }
 
 .product-price{
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: #ffd699;
-  margin: 0 0 8px;
+  margin: 0 0 12px;
 }
 
-/* tombol full width & sejajar */
 .product-btn{
+  margin-top: auto;
   display: block;
   width: 100%;
   text-align: center;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: 999px;
   background: var(--primary);
   color: #fff;
   text-decoration: none;
-  font-size: 0.9rem;
-  margin-top: auto;   /* dorong tombol ke bawah */
+  font-size: 0.95rem;
 }
 
 .product-btn:hover{
   text-decoration: none;
-  filter: brightness(1.05);
+  filter: brightness(1.06);
 }
 
+/* HP: produk 1 kolom biar ga sempit */
+@media (max-width: 640px){
+  .products-row{ grid-template-columns: 1fr; }
+}
+
+/* =================================================
+   MIC DOCK (FIXED BOTTOM + BLUR)
+   ================================================= */
+.mic-dock{
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 999;
+
+  display: grid;
+  place-items: center;
+  gap: var(--dock-gap);
+
+  padding-top: var(--dock-pad-top);
+  padding-bottom: calc(var(--dock-pad-bot) + env(safe-area-inset-bottom, 0px));
+
+  /* glassy blur */
+  background: linear-gradient(
+    180deg,
+    rgba(11,15,20,0.00) 0%,
+    rgba(11,15,20,0.35) 25%,
+    rgba(11,15,20,0.82) 70%,
+    rgba(11,15,20,0.92) 100%
+  );
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+/* =================================================
+   MIC BUTTON (BESAR, CENTER, AKSESIBEL)
+   ================================================= */
+.mic-btn{
+  width: clamp(190px, var(--mic-size-mobile), var(--mic-size));
+  height: clamp(190px, var(--mic-size-mobile), var(--mic-size));
+  border-radius: 50%;
+  border: none;
+
+  background: var(--primary);
+  display: grid;
+  place-items: center;
+
+  box-shadow: 0 20px 60px rgba(0,0,0,.55);
+  transition: transform .08s ease, background .12s ease, box-shadow .12s ease;
+  -webkit-tap-highlight-color: transparent;
+
+  /* fokus keyboard */
+  outline: none;
+}
+.mic-btn:focus-visible{
+  box-shadow: 0 0 0 4px rgba(25,118,210,.35), 0 20px 60px rgba(0,0,0,.55);
+}
+
+.mic-btn i{
+  font-size: clamp(84px, 18vw, 110px);
+  color: #fff;
+  line-height: 1;
+}
+
+/* pressed */
+.mic-btn:active{ transform: scale(.94); }
+
+/* recording */
+.mic-btn.recording{
+  background: var(--danger);
+  box-shadow: 0 20px 60px rgba(176,0,32,.55);
+}
+
+.mic-hint{
+  font-size: 0.98rem;
+  color: var(--muted);
+  text-align: center;
+  padding: 0 14px;
+  max-width: 520px;
+}
+
+/* =================================================
+   AUDIO PLAYER (kalau dipakai)
+   ================================================= */
+#player{
+  max-width: 520px;
+  width: calc(100% - 24px);
+  margin: 0 auto;
+  display: block;
+}
